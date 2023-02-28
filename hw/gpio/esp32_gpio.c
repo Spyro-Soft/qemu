@@ -12,6 +12,7 @@
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "qapi/visitor.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/registerfields.h"
@@ -20,25 +21,57 @@
 #include "hw/gpio/esp32_gpio.h"
 
 
+#define D(x) x
+
+static void esp32_gpio_get_gpio_in_reg(Object *obj, Visitor *v, const char *name,
+                                   void *opaque, Error **errp)
+{
+    visit_type_uint32(v, name, (uint32_t *)opaque, errp);
+}
+
+static void esp32_gpio_set_gpio_in_reg(Object *obj, Visitor *v, const char *name,
+                                   void *opaque, Error **errp)
+{
+    Esp32GpioState *s = ESP32_GPIO(obj);
+
+    if (!visit_type_uint32(v, name, (uint32_t *)opaque, errp)) {
+        return;
+    }
+
+    //qemu_irq_raise(s->irq);
+}
 
 static uint64_t esp32_gpio_read(void *opaque, hwaddr addr, unsigned int size)
 {
+    D(qemu_log("esp32_gpio_read: addr=0x"TARGET_FMT_plx"\n", addr));
+
     Esp32GpioState *s = ESP32_GPIO(opaque);
     uint64_t r = 0;
     switch (addr) {
     case A_GPIO_STRAP:
         r = s->strap_mode;
         break;
-
+    case A_GPIO_IN_REG:
+        r = s->gpio_in_reg;
+        break;
+    case A_GPIO_IN1_REG:
+        r = s->gpio_in1_reg;
+        break;
     default:
         break;
     }
+
     return r;
 }
 
 static void esp32_gpio_write(void *opaque, hwaddr addr,
                        uint64_t value, unsigned int size)
 {
+    D(qemu_log("esp32_gpio_write: addr=0x"TARGET_FMT_plx", value=0x"TARGET_FMT_plx"\n", addr, value));
+
+    Esp32GpioState *s = ESP32_GPIO(opaque);
+
+    //qemu_irq_lower(s->irq);
 }
 
 static const MemoryRegionOps uart_ops = {
@@ -64,6 +97,14 @@ static void esp32_gpio_init(Object *obj)
                           TYPE_ESP32_GPIO, 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
+
+    object_property_add(obj, "gpio_in_reg", "uint32",
+                        esp32_gpio_get_gpio_in_reg,
+                        esp32_gpio_set_gpio_in_reg, NULL, &s->gpio_in_reg);
+
+    object_property_add(obj, "gpio_in1_reg", "uint32",
+                        esp32_gpio_get_gpio_in_reg,
+                        esp32_gpio_set_gpio_in_reg, NULL, &s->gpio_in1_reg);
 }
 
 static Property esp32_gpio_properties[] = {
