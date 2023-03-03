@@ -4,6 +4,10 @@
 #include "hw/hw.h"
 #include "hw/registerfields.h"
 
+#include "chardev/char-fe.h"
+#include "chardev/char-io.h"
+#include "chardev/char-socket.h"
+
 #define TYPE_ESP32_GPIO "esp32.gpio"
 #define ESP32_GPIO(obj) OBJECT_CHECK(Esp32GpioState, (obj), TYPE_ESP32_GPIO)
 
@@ -39,5 +43,15 @@ typedef struct Esp32GpioState {
     uint32_t strap_mode;
     uint32_t gpio_in_reg;
     uint32_t gpio_in1_reg;
+
+    uint32_t gpio_out_reg;
+    uint32_t gpio_out1_reg;
+    uint32_t gpio_enable_reg;
+    uint32_t gpio_enable1_reg;
+
+    uint32_t server_port;
+    CharBackend charbe;
+    Chardev *chardev;
+    QemuMutex mutex;
 } Esp32GpioState;
 
