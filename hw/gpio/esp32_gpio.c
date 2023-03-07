@@ -12,7 +12,6 @@
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
-#include "qapi/visitor.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/registerfields.h"
@@ -20,7 +19,6 @@
 #include "hw/qdev-properties.h"
 #include "hw/gpio/esp32_gpio.h"
 
-#include "qemu/qemu-print.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qnum.h"
