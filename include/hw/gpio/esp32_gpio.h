@@ -49,9 +49,9 @@ typedef struct Esp32GpioState {
     uint32_t gpio_enable_reg;
     uint32_t gpio_enable1_reg;
 
-    uint32_t server_port;
-    CharBackend charbe;
+    char* chardev_name;
     Chardev *chardev;
+    CharBackend charbe;
     QemuMutex mutex;
 } Esp32GpioState;
 

@@ -25,7 +25,7 @@
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qnum.h"
 
-#define ENABLE_DEBUG
+// #define ENABLE_DEBUG
 
 #ifdef ENABLE_DEBUG
 #define D(x) x
@@ -34,18 +34,22 @@
 #endif
 
 /*
-To start a tcp server of GPIO:
--global driver=esp32.gpio,property=server_port,value=15010
+To start a tcp server of esp32.gpio:
+-chardev socket,port=17001,wait=no,host=0.0.0.0,server=on,id=esp32.gpio \
+-global driver=esp32.gpio,property=chardev,value=esp32.gpio \
 
-Event when Output GPIOs were modified:
-{"event":"new_out", "out":0, "out1":0}
+Event when output gpio(s) were modified:
+{"event":"new_out", "out":0, "out1":0}\r\n
 
-Message to set new value of Input GPIOs:
-{"cmd":"set_input", "in":2147483648, "in1":1}
+Message to set new value of input gpio(s):
+{"cmd":"set_input", "in":2147483648, "in1":1}\r\n
 
+4.12.1 GPIO Matrix Register Summary
+
+"in":2147483648 -> 0x80000000 -> MSB corresponds to GPIO31
+"in":1 -> 0x00000001 -> LSB corresponds to GPIO0
 
 TODO:
-- 'chardev' param should be used to define a backend for a communication with esp32.gpio
 - improve handling of gpio_in_reg and gpio_in1_reg registers
 - should a firmware be able to change a state of GPIO when not enabled?
 */
@@ -75,17 +79,17 @@ static void server_read(void *opaque, const uint8_t *buf, int size)
 
     QEMU_LOCK_GUARD(&s->mutex);
 
-    // find CRLF in buf
+    /* find CRLF in buf */
     char* crlf_pos = g_strstr_len((const char* ) buf, size, CRLF);
     if(crlf_pos != NULL)
     {
-        // calc length 
+        /* calc length */
         uint8_t len = (const char*) crlf_pos - (const char*) buf; 
 
-        // prepare string
+        /* prepare string */
         g_autoptr(GString) msg = g_string_new_len((const char*) buf, len);
 
-        // decode json
+        /* decode json */
         Error *err = NULL;
         QDict *dict = qobject_to(QDict, qobject_from_json(msg->str, &err));
         if (dict)
@@ -103,6 +107,8 @@ static void server_read(void *opaque, const uint8_t *buf, int size)
             qobject_unref(dict);
         }
     }
+
+    /* ignore rest data of the buffer. Is it okay? */
 }
 
 
@@ -130,6 +136,8 @@ static void server_event(void *opaque, QEMUChrEvent event)
 
 static uint64_t esp32_gpio_read(void *opaque, hwaddr addr, unsigned int size)
 {
+    D(qemu_log("esp32_gpio_read: addr=0x"HEX64_FMT"\n", addr));
+
     Esp32GpioState *s = ESP32_GPIO(opaque);
 
     QEMU_LOCK_GUARD(&s->mutex);
@@ -155,6 +163,8 @@ static uint64_t esp32_gpio_read(void *opaque, hwaddr addr, unsigned int size)
 static void esp32_gpio_write(void *opaque, hwaddr addr,
                        uint64_t value, unsigned int size)
 {
+    D(qemu_log("esp32_gpio_write: addr=0x"HEX64_FMT", value=0x"HEX64_FMT"\n", addr, value));
+
     Esp32GpioState *s = ESP32_GPIO(opaque);
 
     QEMU_LOCK_GUARD(&s->mutex);
@@ -190,15 +200,18 @@ static void esp32_gpio_write(void *opaque, hwaddr addr,
         break;
     }
 
-    g_autoptr(QDict) dict = qdict_new();
-    qdict_put_str(dict, "event", "new_out");
-    qdict_put_int(dict, "out", s->gpio_out_reg);
-    qdict_put_int(dict, "out1", s->gpio_out1_reg);
+    if(s->chardev)
+    {
+        g_autoptr(QDict) dict = qdict_new();
+        qdict_put_str(dict, "event", "new_out");
+        qdict_put_int(dict, "out", s->gpio_out_reg);
+        qdict_put_int(dict, "out1", s->gpio_out1_reg);
 
-    g_autoptr(GString) json = qobject_to_json(QOBJECT(dict));
-    g_string_append(json, CRLF);
+        g_autoptr(GString) json = qobject_to_json(QOBJECT(dict));
+        g_string_append(json, CRLF);
 
-    qemu_chr_fe_write_all(&s->charbe, (uint8_t *)json->str, json->len);
+        qemu_chr_fe_write_all(&s->charbe, (uint8_t *)json->str, json->len);
+    }
 }
 
 static const MemoryRegionOps uart_ops = {
@@ -215,13 +228,17 @@ static void esp32_gpio_realize(DeviceState *dev, Error **errp)
 {
     Esp32GpioState *s = ESP32_GPIO(dev);
 
-    if(s->server_port != 0x0)
+    if(s->chardev_name)
     {
-        D(qemu_log("esp32_gpio_server: server_port=%u\n", s->server_port));
+        D(qemu_log("esp32_gpio_server: chardev_name=%s\n", s->chardev_name));
 
-        g_autofree char *str;
-        str = g_strdup_printf("tcp::%u,server=on,wait=no,ipv4=on", s->server_port);
-        s->chardev = qemu_chr_new("esp32_gpio_server", str, NULL);
+        s->chardev = qemu_chr_find(s->chardev_name);
+        if (!s->chardev)
+        {
+            error_report("chardev '%s' not found", s->chardev_name);
+            return;
+        }
+
         qemu_chr_fe_init(&s->charbe, s->chardev, &error_abort);
         qemu_chr_fe_set_handlers(&s->charbe, server_can_read, server_read, server_event, NULL, dev, NULL, true);
     }
@@ -242,7 +259,7 @@ static void esp32_gpio_init(Object *obj)
 
 static Property esp32_gpio_properties[] = {
     DEFINE_PROP_UINT32("strap_mode", Esp32GpioState, strap_mode, ESP32_STRAP_MODE_FLASH_BOOT),
-    DEFINE_PROP_UINT32("server_port", Esp32GpioState, server_port, 0x0),
+    DEFINE_PROP_STRING("chardev", Esp32GpioState, chardev_name),
     DEFINE_PROP_END_OF_LIST(),
 };
 
