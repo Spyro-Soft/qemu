@@ -28,7 +28,7 @@
 #ifdef ENABLE_DEBUG
 #define D(x) x
 #else
-#define D(x)
+#define D(x) do {} while(0)
 #endif
 
 /*
@@ -41,11 +41,19 @@ Event when output gpio(s) were modified:
 
 Message to set new value of input gpio(s):
 {"cmd":"set_input", "in":2147483648, "in1":1}\r\n
+{"cmd":"set_input", "in":16}\r\n
 
 4.12.1 GPIO Matrix Register Summary
 
+bitmask: each bit corresponds to one GPIO
+
+"in": GPIO31-GPIO0
 "in":2147483648 -> 0x80000000 -> MSB corresponds to GPIO31
 "in":1 -> 0x00000001 -> LSB corresponds to GPIO0
+
+"in1": GPIO39-GPIO32
+"in1": 128 -> 0x0x00000080 -> GPIO39
+"in1": 1 -> 0x0x00000001 -> GPIO32
 
 TODO:
 - improve handling of gpio_in_reg and gpio_in1_reg registers
@@ -57,7 +65,7 @@ TODO:
 
 #define CRLF "\r\n"
 
-static void set_uint32_reg(QNum *num, uint32_t *reg)
+static void set_uint32_reg(QNum *num, uint32_t *reg, uint32_t mask)
 {
     if(num != NULL && reg != NULL)
     {
@@ -66,7 +74,7 @@ static void set_uint32_reg(QNum *num, uint32_t *reg)
         {
             D(qemu_log("server_read: reg=0x"HEX64_FMT"\n", value));
 
-            *reg = (uint32_t) value;
+            *reg = (uint32_t) value & mask;
         }
     }
 }
@@ -97,8 +105,8 @@ static void server_read(void *opaque, const uint8_t *buf, int size)
             {
                 if(strcmp(cmd, "set_input") == 0)
                 {
-                    set_uint32_reg(qobject_to(QNum, qdict_get(dict, "in")), &s->gpio_in_reg);
-                    set_uint32_reg(qobject_to(QNum, qdict_get(dict, "in1")), &s->gpio_in1_reg);
+                    set_uint32_reg(qobject_to(QNum, qdict_get(dict, "in")), &s->gpio_in_reg, 0xFFFFFFFF);
+                    set_uint32_reg(qobject_to(QNum, qdict_get(dict, "in1")), &s->gpio_in1_reg, 0x0000000F);
                 }
             }
 
