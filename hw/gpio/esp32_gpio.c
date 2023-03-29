@@ -23,7 +23,7 @@
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qnum.h"
 
-// #define ENABLE_DEBUG
+#define ENABLE_DEBUG
 
 #ifdef ENABLE_DEBUG
 #define D(x) x
@@ -162,6 +162,9 @@ static uint64_t esp32_gpio_read(void *opaque, hwaddr addr, unsigned int size)
     case A_GPIO_IN1_REG:
         r = s->gpio_in1_reg;
         break;
+    case A_GPIO_FUNC_OUT ... (A_GPIO_FUNC_OUT+ESP32_GPIO_FUNC_OUT_COUNT*4):
+        r = s->gpio_func_out[addr / 4];
+        break;
     default:
         break;
     }
@@ -180,47 +183,90 @@ static void esp32_gpio_write(void *opaque, hwaddr addr,
 
     uint32_t value32 = (uint32_t) value;
 
+    g_autoptr(QDict) dict = qdict_new();
+
     switch (addr) {
     case A_GPIO_OUT_W1TS_REG:
+        qdict_put_str(dict, "event", "set_out_value");
+        qdict_put_int(dict, "value", value32);
         s->gpio_out_reg |= value32;
         break;
     case A_GPIO_OUT_W1TC_REG:
+        qdict_put_str(dict, "event", "clear_out_value");
+        qdict_put_int(dict, "value", value32);
         s->gpio_out_reg &= ~value32;
         break;
     case A_GPIO_OUT1_W1TS_REG:
+        qdict_put_str(dict, "event", "set_out_value1");
+        qdict_put_int(dict, "value", value32);
         s->gpio_out1_reg |= value32;
         break;
     case A_GPIO_OUT1_W1TC_REG:
+        qdict_put_str(dict, "event", "clear_out_value1");
+        qdict_put_int(dict, "value", value32);
         s->gpio_out1_reg &= ~value32;
         break;
     case A_GPIO_ENABLE_W1TS_REG:
+        qdict_put_str(dict, "event", "enable_gpo");
+        qdict_put_int(dict, "value", value32);
         s->gpio_enable_reg |= value32;
         break;
     case A_GPIO_ENABLE_W1TC_REG:
+        qdict_put_str(dict, "event", "disable_gpo");
+        qdict_put_int(dict, "value", value32);
         s->gpio_enable_reg &= ~value32;
         break;
     case A_GPIO_ENABLE1_W1TS_REG:
+        qdict_put_str(dict, "event", "enable_gpo1");
+        qdict_put_int(dict, "value", value32);
         s->gpio_enable1_reg |= value32;
         break;
     case A_GPIO_ENABLE1_W1TC_REG:
+        qdict_put_str(dict, "event", "disable_gpo1");
+        qdict_put_int(dict, "value", value32);
         s->gpio_enable1_reg &= ~value32;
+        break;
+    case A_GPIO_FUNC_OUT ... (A_GPIO_FUNC_OUT+ESP32_GPIO_FUNC_OUT_COUNT*4):
+        D(qemu_log("A_GPIO_FUNC_OUT: gpio=0x"HEX64_FMT", value=0x"HEX64_FMT"\n", (addr - A_GPIO_FUNC_OUT) / 4, value));
+        s->gpio_func_out[(addr - A_GPIO_FUNC_OUT) / 4] = value;
+
+        if(value == 0x100)
+        {
+            qdict_put_str(dict, "event", "simple_gpio");
+            qdict_put_int(dict, "gpio_num", (addr - A_GPIO_FUNC_OUT) / 4);
+        }
+        else
+        {
+            qdict_put_str(dict, "event", "not_simple_gpio");
+            qdict_put_int(dict, "gpio_num", (addr - A_GPIO_FUNC_OUT) / 4);   
+        }
         break;
     default:
         break;
     }
 
-    if(s->chardev)
+    if(s->chardev && qdict_size(dict) > 0)
     {
-        g_autoptr(QDict) dict = qdict_new();
-        qdict_put_str(dict, "event", "new_out");
-        qdict_put_int(dict, "out", s->gpio_out_reg);
-        qdict_put_int(dict, "out1", s->gpio_out1_reg);
-
         g_autoptr(GString) json = qobject_to_json(QOBJECT(dict));
         g_string_append(json, CRLF);
 
         qemu_chr_fe_write_all(&s->charbe, (uint8_t *)json->str, json->len);
     }
+}
+
+static uint64_t esp32_iomux_read(void *opaque, hwaddr addr, unsigned int size)
+{
+    D(qemu_log("esp32_iomux_read: addr=0x"HEX64_FMT"\n", addr));
+
+    uint64_t r = 0;
+
+    return r;
+}
+
+static void esp32_iomux_write(void *opaque, hwaddr addr,
+                       uint64_t value, unsigned int size)
+{
+    D(qemu_log("esp32_iomux_write: addr=0x"HEX64_FMT", value=0x"HEX64_FMT"\n", addr, value));
 }
 
 static const MemoryRegionOps uart_ops = {
@@ -229,8 +275,17 @@ static const MemoryRegionOps uart_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
+static const MemoryRegionOps iomux_uart_ops = {
+    .read =  esp32_iomux_read,
+    .write = esp32_iomux_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
+
 static void esp32_gpio_reset(DeviceState *dev)
 {
+    Esp32GpioState *s = ESP32_GPIO(dev);
+
+    memset(s->gpio_func_out, 0, sizeof(s->gpio_func_out));
 }
 
 static void esp32_gpio_realize(DeviceState *dev, Error **errp)
@@ -261,6 +316,11 @@ static void esp32_gpio_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &uart_ops, s,
                           TYPE_ESP32_GPIO, 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
+
+    memory_region_init_io(&s->iomux_mem, obj, &iomux_uart_ops, s,
+                          "esp32.iomux", 0x2000);
+    sysbus_init_mmio(sbd, &s->iomux_mem);
+
     sysbus_init_irq(sbd, &s->irq);
 
     qemu_mutex_init(&s->mutex);

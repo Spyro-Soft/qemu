@@ -238,9 +238,9 @@ static void esp32_clk_update(void* opaque, int n, int level)
     *(uint32_t*)(&s->cpu[0].env.config->clock_freq_khz) = cpu_clk_freq / 1000;
 }
 
-static void esp32_soc_add_periph_device(MemoryRegion *dest, void* dev, hwaddr dport_base_addr)
+static void esp32_soc_add_periph_device(MemoryRegion *dest, void* dev, hwaddr dport_base_addr, int region)
 {
-    MemoryRegion *mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
+    MemoryRegion *mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), region);
     memory_region_add_subregion_overlap(dest, dport_base_addr, mr, 0);
     MemoryRegion *mr_apb = g_new(MemoryRegion, 1);
     char *name = g_strdup_printf("mr-apb-0x%08x", (uint32_t) dport_base_addr);
@@ -379,19 +379,19 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
     }
 
     qdev_realize(DEVICE(&s->rsa), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->rsa, DR_REG_RSA_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->rsa, DR_REG_RSA_BASE, 0);
 
     qdev_realize(DEVICE(&s->sha), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->sha, DR_REG_SHA_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->sha, DR_REG_SHA_BASE, 0);
 
     qdev_realize(DEVICE(&s->aes), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->aes, DR_REG_AES_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->aes, DR_REG_AES_BASE, 0);
 
     qdev_realize(DEVICE(&s->ledc), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->ledc, DR_REG_LEDC_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->ledc, DR_REG_LEDC_BASE, 0);
 
     qdev_realize(DEVICE(&s->rtc_cntl), &s->rtc_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->rtc_cntl, DR_REG_RTCCNTL_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->rtc_cntl, DR_REG_RTCCNTL_BASE, 0);
 
     qdev_connect_gpio_out_named(DEVICE(&s->rtc_cntl), ESP32_RTC_DIG_RESET_GPIO, 0,
                                 qdev_get_gpio_in_named(dev, ESP32_RTC_DIG_RESET_GPIO, 0));
@@ -405,14 +405,15 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
     }
 
     qdev_realize(DEVICE(&s->gpio), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->gpio, DR_REG_GPIO_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->gpio, DR_REG_GPIO_BASE, 0);
+    esp32_soc_add_periph_device(sys_mem, &s->gpio, DR_REG_IO_MUX_BASE, 1);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
                        qdev_get_gpio_in(intmatrix_dev, ETS_GPIO_INTR_SOURCE));
 
     for (int i = 0; i < ESP32_UART_COUNT; ++i) {
         const hwaddr uart_base[] = {DR_REG_UART_BASE, DR_REG_UART1_BASE, DR_REG_UART2_BASE};
         qdev_realize(DEVICE(&s->uart[i]), &s->periph_bus, &error_fatal);
-        esp32_soc_add_periph_device(sys_mem, &s->uart[i], uart_base[i]);
+        esp32_soc_add_periph_device(sys_mem, &s->uart[i], uart_base[i], 0);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart[i]), 0,
                            qdev_get_gpio_in(intmatrix_dev, ETS_UART0_INTR_SOURCE + i));
     }
@@ -420,7 +421,7 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
     for (int i = 0; i < ESP32_FRC_COUNT; ++i) {
         qdev_realize(DEVICE(&s->frc_timer[i]), &s->periph_bus, &error_fatal);
 
-        esp32_soc_add_periph_device(sys_mem, &s->frc_timer[i], DR_REG_FRC_TIMER_BASE + i * ESP32_FRC_TIMER_STRIDE);
+        esp32_soc_add_periph_device(sys_mem, &s->frc_timer[i], DR_REG_FRC_TIMER_BASE + i * ESP32_FRC_TIMER_STRIDE, 0);
 
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->frc_timer[i]), 0,
                            qdev_get_gpio_in(intmatrix_dev, ETS_TIMER1_INTR_SOURCE + i));
@@ -432,7 +433,7 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
         const hwaddr timg_base[] = {DR_REG_TIMERGROUP0_BASE, DR_REG_TIMERGROUP1_BASE};
         qdev_realize(DEVICE(&s->timg[i]), &s->periph_bus, &error_fatal);
 
-        esp32_soc_add_periph_device(sys_mem, &s->timg[i], timg_base[i]);
+        esp32_soc_add_periph_device(sys_mem, &s->timg[i], timg_base[i], 0);
 
         int timg_level_int[] = { ETS_TG0_T0_LEVEL_INTR_SOURCE, ETS_TG1_T0_LEVEL_INTR_SOURCE };
         int timg_edge_int[] = { ETS_TG0_T0_EDGE_INTR_SOURCE, ETS_TG1_T0_EDGE_INTR_SOURCE };
@@ -454,7 +455,7 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
         };
         qdev_realize(DEVICE(&s->spi[i]), &s->periph_bus, &error_fatal);
 
-        esp32_soc_add_periph_device(sys_mem, &s->spi[i], spi_base[i]);
+        esp32_soc_add_periph_device(sys_mem, &s->spi[i], spi_base[i], 0);
 
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->spi[i]), 0,
                            qdev_get_gpio_in(intmatrix_dev, ETS_SPI0_INTR_SOURCE + i));
@@ -466,22 +467,22 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
         };
         qdev_realize(DEVICE(&s->i2c[i]), &s->periph_bus, &error_fatal);
 
-        esp32_soc_add_periph_device(sys_mem, &s->i2c[i], i2c_base[i]);
+        esp32_soc_add_periph_device(sys_mem, &s->i2c[i], i2c_base[i], 0);
 
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->i2c[i]), 0,
                            qdev_get_gpio_in(intmatrix_dev, ETS_I2C_EXT0_INTR_SOURCE + i));
     }
 
     qdev_realize(DEVICE(&s->rng), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->rng, ESP32_RNG_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->rng, ESP32_RNG_BASE, 0);
 
     qdev_realize(DEVICE(&s->efuse), &s->periph_bus, &error_fatal);
-    esp32_soc_add_periph_device(sys_mem, &s->efuse, DR_REG_EFUSE_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->efuse, DR_REG_EFUSE_BASE, 0);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->efuse), 0,
                        qdev_get_gpio_in(intmatrix_dev, ETS_EFUSE_INTR_SOURCE));
 
     qdev_realize(DEVICE(&s->flash_enc), &s->periph_bus, &error_abort);
-    esp32_soc_add_periph_device(sys_mem, &s->flash_enc, DR_REG_SPI_ENCRYPT_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->flash_enc, DR_REG_SPI_ENCRYPT_BASE, 0);
 
     qdev_connect_gpio_out_named(DEVICE(&s->efuse), ESP32_EFUSE_UPDATE_GPIO, 0,
                                 qdev_get_gpio_in_named(DEVICE(&s->flash_enc), ESP32_FLASH_ENCRYPTION_EFUSE_UPDATE_GPIO, 0));
@@ -491,14 +492,14 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
                                 qdev_get_gpio_in_named(DEVICE(&s->flash_enc), ESP32_FLASH_ENCRYPTION_DEC_EN_GPIO, 0));
 
     qdev_realize(DEVICE(&s->sdmmc), &s->periph_bus, &error_abort);
-    esp32_soc_add_periph_device(sys_mem, &s->sdmmc, DR_REG_SDMMC_BASE);
+    esp32_soc_add_periph_device(sys_mem, &s->sdmmc, DR_REG_SDMMC_BASE, 0);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdmmc), 0,
                        qdev_get_gpio_in(intmatrix_dev, ETS_SDIO_HOST_INTR_SOURCE));
 
     esp32_soc_add_unimp_device(sys_mem, "esp32.analog", DR_REG_ANA_BASE, 0x1000);
     esp32_soc_add_unimp_device(sys_mem, "esp32.rtcio", DR_REG_RTCIO_BASE, 0x400);
     esp32_soc_add_unimp_device(sys_mem, "esp32.rtcio", DR_REG_SENS_BASE, 0x400);
-    esp32_soc_add_unimp_device(sys_mem, "esp32.iomux", DR_REG_IO_MUX_BASE, 0x2000);
+    /* esp32_soc_add_unimp_device(sys_mem, "esp32.iomux", DR_REG_IO_MUX_BASE, 0x2000); */
     esp32_soc_add_unimp_device(sys_mem, "esp32.hinf", DR_REG_HINF_BASE, 0x1000);
     esp32_soc_add_unimp_device(sys_mem, "esp32.slc", DR_REG_SLC_BASE, 0x1000);
     esp32_soc_add_unimp_device(sys_mem, "esp32.slchost", DR_REG_SLCHOST_BASE, 0x1000);

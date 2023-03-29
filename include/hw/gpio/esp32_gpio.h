@@ -11,6 +11,8 @@
 #define TYPE_ESP32_GPIO "esp32.gpio"
 #define ESP32_GPIO(obj) OBJECT_CHECK(Esp32GpioState, (obj), TYPE_ESP32_GPIO)
 
+#define ESP32_GPIO_FUNC_OUT_COUNT 40
+
 REG32(GPIO_OUT_REG, 0x0004)
 REG32(GPIO_OUT_W1TS_REG, 0x0008)
 REG32(GPIO_OUT_W1TC_REG, 0x000c)
@@ -32,6 +34,9 @@ REG32(GPIO_STRAP, 0x0038)
 REG32(GPIO_IN_REG, 0x003c)
 REG32(GPIO_IN1_REG, 0x0040)
 
+REG32(GPIO_FUNC_OUT, 0x0530)
+
+
 #define ESP32_STRAP_MODE_FLASH_BOOT 0x12
 #define ESP32_STRAP_MODE_UART_BOOT  0x0f
 
@@ -39,6 +44,7 @@ typedef struct Esp32GpioState {
     SysBusDevice parent_obj;
 
     MemoryRegion iomem;
+    MemoryRegion iomux_mem;
     qemu_irq irq;
     uint32_t strap_mode;
     uint32_t gpio_in_reg;
@@ -53,5 +59,7 @@ typedef struct Esp32GpioState {
     Chardev *chardev;
     CharBackend charbe;
     QemuMutex mutex;
+
+    uint32_t gpio_func_out[ESP32_GPIO_FUNC_OUT_COUNT];
 } Esp32GpioState;
 
